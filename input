@@ -1,0 +1,66 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error
+import mlflow
+import mlflow.sklearn
+
+# Simulação de dados (temperatura e vendas de sorvete)
+def generate_data():
+    np.random.seed(42)
+    temperatures = np.random.uniform(low=20, high=40, size=100)  # Temperaturas entre 20°C e 40°C
+    sales = 10 + 2 * temperatures + np.random.normal(scale=5, size=temperatures.shape)  # Relação linear + ruído
+    data = pd.DataFrame({'Temperature': temperatures, 'Sales': sales})
+    return data
+
+# Treinamento do modelo
+def train_model(data):
+    X = data[['Temperature']]
+    y = data['Sales']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    with mlflow.start_run():
+        # Treinamento
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+
+        # Avaliação
+        y_pred = model.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        print(f"RMSE: {rmse}")
+
+        # Registro no MLflow
+        mlflow.log_metric("rmse", rmse)
+        mlflow.sklearn.log_model(model, "ice_cream_sales_model")
+        print("Modelo registrado com sucesso!")
+
+# Pipeline principal
+if __name__ == "__main__":
+    data = generate_data()
+    train_model(data)
+
+    from flask import Flask, request, jsonify
+import mlflow.pyfunc
+import pandas as pd
+
+app = Flask(__name__)
+
+# Carregar o modelo registrado no MLflow
+MODEL_URI = "runs:/<RUN_ID>/ice_cream_sales_model"  # Substitua <RUN_ID> pelo ID do run do MLflow
+model = mlflow.pyfunc.load_model(MODEL_URI)
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    data = request.json
+    temperature = data.get('temperature')
+    if temperature is None:
+        return jsonify({"error": "Campo 'temperature' é obrigatório"}), 400
+
+    # Previsão
+    input_data = pd.DataFrame({'Temperature': [temperature]})
+    prediction = model.predict(input_data)
+    return jsonify({"predicted_sales": prediction[0]})
+
+if __name__ == "__main__":
+    app.run(debug=True, host='0.0.0.0', port=5000)
